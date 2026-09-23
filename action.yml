@@ -31,4 +31,215 @@ runs:
   main: "dist/index.js"
 branding:
   icon: "search"
-  color: "gray-dark"
+  color: "gray-dark"GitHub Actions is GitHub’s built-in CI/CD and automation platform. It lets you define automated processes (workflows) that run in response to events in your repository — pushes, pull requests, issues, schedules, manual triggers, and more.
+It goes far beyond traditional CI: you can automate labeling, releasing, security scanning, deployments, notifications, and almost any repository-related task.
+
+Core Concepts
+Concept
+Description
+Workflow
+A configurable automated process defined in a YAML file (.github/workflows/*.yml). A repo can have many workflows.
+Event
+Something that triggers a workflow (e.g. push, pull_request, schedule, workflow_dispatch, release, issue_comment, etc.).
+Job
+A set of steps that runs on the same runner. Jobs can run in parallel or sequentially (via needs).
+Step
+An individual task inside a job — either a shell command (run:) or a reusable action (uses:).
+Action
+A reusable unit of code. Can be JavaScript, Docker-based, or composite (a sequence of steps).
+Runner
+The machine that executes the job. GitHub provides hosted runners (Ubuntu, Windows, macOS) or you can use self-hosted ones.
+Matrix
+Run the same job multiple times with different combinations of variables (OS, language version, etc.).
+
+Workflow File Structure
+Workflows live in .github/workflows/ and use YAML.
+name: CI Pipeline                    # Display name
+run-name: Deploy by @${{ github.actor }}  # Optional custom run name
+
+on:                                  # Triggers
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * 1'              # Every Monday at 02:00 UTC
+  workflow_dispatch:                 # Manual trigger
+    inputs:
+      environment:
+        description: 'Target env'
+        required: true
+        default: 'staging'
+        type: choice
+        options: [staging, production]
+
+permissions:                         # Least-privilege permissions
+  contents: read
+  pull-requests: write
+
+concurrency:                         # Cancel older runs on same branch
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:                                 # Global env vars
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install & Test
+        run: |
+          npm ci
+          npm test
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production          # Uses environment protection rules
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: echo "Deploying..."
+Key top-level keys:
+	•	name / run-name
+	•	on (triggers + filters)
+	•	permissions
+	•	env
+	•	concurrency
+	•	jobs
+
+Jobs, Steps, and Dependencies
+	•	Jobs run in parallel by default.
+	•	Use needs: [job1, job2] to make a job wait for others.
+	•	Steps inside a job run sequentially and share the same filesystem.
+	•	You can pass data between steps via:
+	◦	$GITHUB_OUTPUT (step outputs)
+	◦	Artifacts (actions/upload-artifact / download-artifact)
+	◦	Cache (actions/cache)
+Matrix example (test on multiple Node versions + OSes):
+strategy:
+  matrix:
+    os: [ubuntu-latest, windows-latest]
+    node: [18, 20, 22]
+  fail-fast: false
+runs-on: ${{ matrix.os }}
+
+Actions & `action.yml`
+Actions are reusable components. Every custom action needs a metadata file named action.yml (or action.yaml) at the root of the action’s repository.
+Required fields in `action.yml`
+name: 'My Custom Action'
+description: 'Does something useful'
+author: 'Your Name'
+
+inputs:
+  who-to-greet:
+    description: 'Who to greet'
+    required: true
+    default: 'World'
+
+outputs:
+  time:
+    description: 'The time we greeted'
+    # For composite actions you also set value:
+
+runs:
+  using: 'node20'          # or 'node24', 'docker', 'composite'
+  main: 'dist/index.js'    # for JS actions
+Three types of actions
+Type
+runs.using
+Best for
+JavaScript
+node20 / node24
+Fast, pure JS/TS logic
+Docker
+docker
+Any language, complex dependencies
+Composite
+composite
+Reusable sequences of steps (no new runtime)
+Composite action example:
+runs:
+  using: 'composite'
+  steps:
+    - run: echo "Hello ${{ inputs.who-to-greet }}"
+      shell: bash
+    - id: set-time
+      run: echo "time=$(date)" >> $GITHUB_OUTPUT
+      shell: bash
+
+Contexts, Expressions & Secrets
+You use expressions with ${{ }}:
+	•	github context → github.actor, github.ref, github.event, github.sha, etc.
+	•	runner → runner.os, runner.arch
+	•	env, secrets, vars, inputs, needs, steps, matrix, job
+Secrets:
+	•	Repository / Organization / Environment secrets
+	•	Accessed via ${{ secrets.MY_SECRET }}
+	•	Never log them; they are masked automatically
+OIDC (recommended for cloud auth): Instead of long-lived cloud credentials, use OpenID Connect so the runner can assume a role in AWS/Azure/GCP without storing secrets.
+
+Runners
+GitHub-hosted:
+	•	ubuntu-latest, windows-latest, macos-latest
+	•	Larger runners available (more CPU/RAM)
+	•	Fresh VM for every job
+Self-hosted:
+	•	Run on your own hardware/VMs
+	•	Useful for private networks, special hardware, or cost control
+	•	Label-based selection: runs-on: [self-hosted, linux, gpu]
+
+Advanced Features
+	•	Reusable workflows (workflow_call) — call one workflow from another
+	•	Environments — protection rules, required reviewers, wait timers, deployment branches
+	•	Artifacts & Caching — share build outputs and speed up dependency installs
+	•	Concurrency groups — prevent overlapping runs
+	•	Permissions — default to least privilege (permissions: {} then grant only what you need)
+	•	YAML anchors (supported) — reduce duplication
+	•	Workflow execution protections (GA as of 2026) — control who/what can trigger specific workflows
+
+Security Best Practices (2026)
+	1	Pin actions to full commit SHAs, not tags: uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+	2	
+	3	Set permissions at the workflow (or job) level to the minimum required.
+	4	Prefer OIDC over long-lived cloud credentials.
+	5	Use concurrency to cancel superseded runs.
+	6	Avoid pull_request_target + untrusted code + secrets (GitHub is tightening defaults on this).
+	7	Enable Dependabot/Renovate for action updates.
+	8	Add timeout-minutes to jobs.
+	9	Use path filters so docs-only changes don’t trigger full CI.
+
+Common Patterns
+CI on every PR + deploy only on main:
+on:
+  push:
+    branches: [main]
+  pull_request:
+Manual deployment with approval:
+environment:
+  name: production
+  # Configure required reviewers in repo settings
+Nightly scheduled jobs:
+on:
+  schedule:
+    - cron: '0 3 * * *'
+
+Getting Started Resources
+	•	Official docs: docs.github.com/en/actions
+	•	Quickstart + templates in the GitHub UI (Actions tab → “New workflow”)
+	•	Marketplace: thousands of ready-made actions
+	•	GitHub Actions certification available
+Would you like a deep dive into any specific part next — writing custom actions, reusable workflows, security hardening, matrix strategies, self-hosted runners, or real-world CI/CD examples for a particular language/stack?
